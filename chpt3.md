@@ -1,6 +1,12 @@
 ### Chapter 3: Writing Loosely Coupled Code
 
-This chapter builds directly on the foundation laid in Chapter 2, where the authors presented a tightly coupled implementation of an e-commerce application for a fictional developer named Mary Rowan. The goal here is to refactor that application into a loosely coupled version using Dependency Injection (DI) principles. The authors emphasize that understanding bad practices (from Chapter 2) is crucial for appreciating good ones, much like knowing why you should let a grilled steak rest before slicing it—to redistribute the juices for a juicier result. Cutting too soon lets the juices run out, making the meat dry and less enjoyable. Similarly, tightly coupled code leads to brittle, hard-to-maintain systems, while loosely coupled code allows for better redistribution of responsibilities, making the application more flexible, testable, and extensible.
+	•	The chapter builds on the foundation laid in Chapter 2.
+	•	The authors presented a tightly coupled implementation of an e-commerce application in Chapter 2.
+	•	The goal of this chapter is to refactor the application into a loosely coupled version using Dependency Injection (DI) principles.
+	•	Understanding bad practices (from Chapter 2) is crucial for appreciating good ones.
+	•	Tightly coupled code leads to brittle, hard-to-maintain systems.
+	•	Loosely coupled code allows for better redistribution of responsibilities, making the application more flexible, testable, and extensible.
+
 
 The chapter is structured around rebuilding Mary's e-commerce application with DI, analyzing the new implementation, and evaluating its benefits. The authors use the same domain: an ASP.NET Core web application that displays featured products with user-specific discounts and currency conversions. The volatile dependencies (like data access and user context) are inverted using abstractions and injected via constructors. All technical details, including code examples, are preserved as in the book, with explanations of why each change promotes loose coupling. The authors introduce key DI patterns: Constructor Injection (the primary method used), Method Injection (for occasional use), and the Composition Root (where the object graph is assembled).
 
