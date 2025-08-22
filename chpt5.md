@@ -1,463 +1,307 @@
-## Chapter 5: Dependency Injection in ASP.NET Core
+# Comprehensive Analysis of Chapter 5: DI Anti-Patterns from "Dependency Injection Principles, Practices, and Patterns"
 
-# Key Points from Chapter 5: Dependency Injection in ASP.NET Core
+The latest edition of *Dependency Injection Principles, Practices, and Patterns* by Mark Seemann and Steven van Deursen (published in 2019 by Manning Publications) updates the foundational concepts of Dependency Injection (DI) for modern .NET development, including .NET Core and beyond. This edition emphasizes practical application in loosely coupled systems, with a focus on ASP.NET Core integration. Chapter 5, titled "DI Anti-Patterns," serves as a critical component of Part 2: The DI Catalog. It builds on the patterns introduced in Chapter 4 by highlighting common pitfalls that undermine the benefits of DI, such as reduced maintainability, testability, and modularity. The authors' perspective is clear: anti-patterns are not merely bad habits but systematic errors that invert the Inversion of Control (IoC) principle, leading to tightly coupled code that resists change and hides dependencies.
 
-1. **ASP.NET Core Integrates Dependency Injection (DI) as a First-Class Feature:**  
-   ASP.NET Core uses a built-in DI container to manage dependencies, making DI deeply embedded into the framework. This enables seamless dependency management across controllers, services, and middleware.
+The chapter's primary objective is to equip developers with the ability to recognize and avoid these anti-patterns early in the design process. Seemann and van Deursen stress that while patterns provide positive guidance, understanding anti-patterns is equally vital for refactoring legacy code and preventing regressions in new projects. They define an anti-pattern as a commonly recurring solution that appears attractive but ultimately generates negative consequences, often violating core DI principles like explicit dependencies and composability.
 
-2. **DI System Designed with Core Principles in Mind:**  
-   The framework naturally supports DI principles like Constructor Injection and the Composition Root pattern. This ensures consistency with software design best practices, promoting maintainability and testability.
+The authors structure the chapter around four key DI anti-patterns: Control Freak, Bastard Injection, Constrained Construction, and Service Locator. For each, they provide detailed explanations, real-world motivations for why developers fall into them, illustrative examples drawn from an e-commerce application domain (e.g., a Commerce system handling products, repositories, and services), and guidance on why these approaches fail. Where the book's examples are domain-specific, I'll replicate them closely; for broader technical aspects (e.g., implications in .NET Core's service lifetime management), I'll supplement with alternative examples if needed, while staying true to the authors' intent. Every minor yet significant topic is covered, including subtle variations, edge cases, and refactorings to proper DI patterns.
 
-3. **Practical Guidance on Using the DI System:**  
-   The chapter provides detailed instructions on service registration, managing service lifetimes (Transient, Scoped, Singleton), and handling advanced scenarios. This practical approach helps developers implement DI effectively in real-world applications.
+## Introduction to DI Anti-Patterns (Chapter Overview)
 
-4. **Assumes Prior Knowledge of Basic DI Concepts:**  
-   The chapter builds on DI concepts introduced earlier, focusing on how they apply specifically to ASP.NET Core. A foundation in DI principles is necessary to fully grasp the content.
+Seemann and van Deursen open the chapter by contrasting anti-patterns with the positive DI patterns from Chapter 4 (e.g., Constructor Injection, Method Injection). They argue that anti-patterns often stem from incomplete understanding of IoC: instead of allowing dependencies to be supplied externally, classes seize control, leading to implicit couplings. This violates the Dependency Inversion Principle (DIP), where high-level modules should not depend on low-level ones—both should depend on abstractions.
 
-5. **Common Pitfalls and Best Practices Highlighted:**  
-   Guidance includes avoiding service locator patterns, understanding Captive Dependencies, and ensuring proper lifetime configurations. This helps prevent common mistakes and promotes best practices.
+A key theme is the distinction between *Volatile Dependencies* (those that may change, like database access) and *Stable Dependencies* (e.g., core .NET libraries like `string`). Anti-patterns typically mishandle Volatile Dependencies, making unit testing difficult and deployment brittle. The authors emphasize that recognizing these in code reviews or refactoring sessions can prevent "big ball of mud" architectures. They also note that while some anti-patterns (like Service Locator) were once promoted in early DI literature, evolving practices in .NET Core (e.g., built-in DI container in ASP.NET Core) render them obsolete.
 
+The chapter uses C# code snippets throughout, assuming a .NET Core environment with interfaces for abstractions (e.g., `IProductRepository`). Examples are iterative, building on the Commerce application's `ProductService` class, which calculates discounts and interacts with a repository.
 
-### 5.1 Introduction to DI in ASP.NET Core
+## 1. Control Freak
 
-**Key Points:**
-- ASP.NET Core includes a built-in DI container, often referred to as the *Microsoft.Extensions.DependencyInjection* container, which is simple yet sufficient for most application needs.
-- The DI container is integrated into the ASP.NET Core pipeline, enabling dependency injection for controllers, services, middleware, and other components.
-- The chapter emphasizes that DI in ASP.NET Core follows the *Constructor Injection* pattern, aligning with the principles of explicit dependencies and loose coupling.
-- The authors highlight that while the built-in container is adequate for most scenarios, it lacks some advanced features (e.g., auto-registration, interception) found in third-party containers like Autofac or SimpleInjector. However, the built-in container can be replaced if needed.
+### Explanation and Author's Perspective
+The Control Freak anti-pattern occurs when a class directly instantiates its Volatile Dependencies instead of allowing them to be injected. This inverts IoC by making the class "control" its dependencies, leading to tight coupling. Seemann and van Deursen view this as the most fundamental violation of DI: it hides dependencies, making the class's requirements opaque and unit testing impossible without side effects (e.g., hitting a real database). They argue it's often a symptom of developers new to DI who revert to procedural habits. In .NET Core, this exacerbates issues with service lifetimes (e.g., scoped vs. transient), as the class bypasses the container's management.
 
-**Authors’ Perspective:**
-The authors stress that ASP.NET Core’s DI system is designed to be lightweight and easy to use, encouraging developers to adopt DI without needing external libraries for most applications. They advocate for leveraging the framework’s conventions to simplify DI configuration while adhering to SOLID principles.
+Minor topics covered include:
+- **Distinction from Stable Dependencies**: Instantiating stable types (e.g., `new List<T>()`) is acceptable, but Volatile ones (e.g., `new SqlConnection()`) are not.
+- **Edge Cases**: Factories or builders inside the class can mask Control Freak but still qualify if they create Volatile Dependencies.
+- **Motivations for Use**: Convenience in prototypes or when dependencies seem "simple," but this scales poorly.
 
-### 5.2 Setting Up the Composition Root
-
-The Composition Root is the centralized location where all dependencies are composed. In ASP.NET Core, the Composition Root is typically configured in the `Startup` class (or, in later versions, the `Program.cs` file for top-level statements).
-
-#### 5.2.1 Configuring Services in `Startup`
-
-**Book Example:**
-The book uses a sample e-commerce application called *Commerce*, which includes a product catalog and pricing logic. The Composition Root is set up in the `Startup` class, specifically in the `ConfigureServices` method.
+### Book's Example
+The authors illustrate with the `ProductService` class in the Commerce application, which needs an `IProductRepository` to fetch products for discount calculations. In the anti-pattern version:
 
 ```csharp
-public class Startup
+public class ProductService
 {
-    public void ConfigureServices(IServiceCollection services)
+    private readonly IProductRepository repository;
+
+    public ProductService()
     {
-        services.AddControllersWithViews();
-        services.AddScoped<IProductService, ProductService>();
-        services.AddScoped<IProductRepository, SqlProductRepository>();
-        services.AddScoped<IPricingService, PricingService>();
+        this.repository = new SqlProductRepository();  // Control Freak: Directly instantiating a Volatile Dependency
     }
 
-    public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+    public decimal CalculateDiscountedPrice(int productId)
     {
-        // Pipeline configuration (omitted for brevity)
+        var product = this.repository.GetById(productId);
+        // Apply discount logic...
+        return product.Price * 0.9m;  // Simplified discount
     }
 }
 ```
 
-**Explanation:**
-- `IServiceCollection` is the interface used to register services with the DI container.
-- `AddScoped`, `AddTransient`, and `AddSingleton` are extension methods to register services with different lifetimes (discussed later).
-- In the example, `IProductService`, `IProductRepository`, and `IPricingService` are interfaces implemented by concrete classes (`ProductService`, `SqlProductRepository`, `PricingService`). These are registered with the *Scoped* lifetime, meaning a new instance is created per HTTP request.
-- `AddControllersWithViews` registers the MVC framework, which relies on the DI container to resolve controllers and their dependencies.
+Here, `SqlProductRepository` is a concrete implementation connecting to a SQL database—a Volatile Dependency due to external I/O. The class "freaks out" by not relinquishing control, making it impossible to test `CalculateDiscountedPrice` without a live database.
 
-**Technical Details:**
-- The `ConfigureServices` method is called during application startup, building the service provider (`IServiceProvider`) that resolves dependencies at runtime.
-- The authors emphasize that the `Startup` class is the ideal place for the Composition Root because it centralizes dependency configuration, making it easy to understand and maintain.
-- The book warns against scattering dependency registrations across the application, as this violates the Composition Root pattern and makes the system harder to reason about.
+### Why It's Problematic
+- **Testability**: Unit tests can't mock the repository; integration tests are required, slowing development.
+- **Maintainability**: Changing to a different repository (e.g., MongoDB) requires modifying `ProductService`, violating Open-Closed Principle.
+- **Composability**: The class can't be reused in different contexts (e.g., in-memory for testing).
 
-#### 5.2.2 Program.cs in .NET 6 and Later
+In .NET Core, this ignores the `IServiceProvider` ecosystem, where dependencies could be resolved with proper scopes.
 
-For .NET 6 and later, the authors note that the `Startup` class is optional, and the Composition Root can be configured directly in `Program.cs` using top-level statements. For example:
+### Refactoring to Proper DI
+The authors recommend refactoring to Constructor Injection (from Chapter 4):
 
 ```csharp
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddControllersWithViews();
-builder.Services.AddScoped<IProductService, ProductService>();
-builder.Services.AddScoped<IProductRepository, SqlProductRepository>();
-builder.Services.AddScoped<IPricingService, PricingService>();
-
-var app = builder.Build();
-app.UseRouting();
-app.MapControllerRoute("default", "{controller=Home}/{action=Index}/{id?}");
-app.Run();
-```
-
-**Authors’ Perspective:**
-The shift to `Program.cs` simplifies the setup but doesn’t change the underlying DI principles. The authors stress that whether using `Startup` or `Program.cs`, the Composition Root should remain centralized and explicit.
-
-### 5.3 Service Lifetimes
-
-ASP.NET Core supports three primary service lifetimes: **Transient**, **Scoped**, and **Singleton**. The authors dedicate significant attention to explaining these lifetimes, as choosing the correct lifetime is critical for application correctness and performance.
-
-#### 5.3.1 Transient Lifetime
-
-- **Definition:** A new instance is created each time the service is resolved.
-- **Registration:** `services.AddTransient<TService, TImplementation>();`
-- **Use Case:** Suitable for lightweight, stateless services where a new instance per resolution is acceptable.
-
-**Book Example:**
-```csharp
-services.AddTransient<IPriceCalculator, DiscountedPriceCalculator>();
-```
-
-**Explanation:**
-- In the *Commerce* application, `IPriceCalculator` is a stateless service that calculates prices based on input. Since it has no state, creating a new instance per resolution (e.g., per controller action) is safe and efficient.
-- The authors note that Transient services are short-lived and garbage-collected quickly, but overuse can lead to performance issues due to frequent object creation.
-
-#### 5.3.2 Scoped Lifetime
-
-- **Definition:** A single instance is created per scope, typically an HTTP request in ASP.NET Core.
-- **Registration:** `services.AddScoped<TService, TImplementation>();`
-- **Use Case:** Ideal for services that maintain state for the duration of a request, such as database contexts or services that share data within a request.
-
-**Book Example:**
-```csharp
-services.AddScoped<IProductRepository, SqlProductRepository>();
-```
-
-**Explanation:**
-- `SqlProductRepository` interacts with a database and may cache data or maintain a connection for the duration of a request. Using *Scoped* ensures that all components within the same HTTP request share the same instance.
-- The authors highlight that ASP.NET Core automatically creates a scope per HTTP request, making *Scoped* the default choice for most application services.
-
-#### 5.3.3 Singleton Lifetime
-
-- **Definition:** A single instance is created for the entire application lifetime and shared across all requests.
-- **Registration:** `services.AddSingleton<TService, TImplementation>();`
-- **Use Case:** Suitable for stateless services or services that maintain global state, such as configuration or caching services.
-
-**Book Example:**
-```csharp
-services.AddSingleton<IConfiguration, Configuration>();
-```
-
-**Explanation:**
-- `IConfiguration` holds application-wide settings, which are loaded once at startup and remain constant. Using *Singleton* ensures a single instance is shared across all requests.
-- The authors warn that Singletons must be thread-safe, as they are accessed concurrently by multiple requests.
-
-**Technical Considerations:**
-- The book provides a detailed comparison of lifetimes, emphasizing that choosing the wrong lifetime can lead to bugs (e.g., sharing a Scoped service across requests or using a Transient service for stateful operations).
-- The authors introduce the concept of *Captive Dependencies*, where a service with a longer lifetime (e.g., Singleton) depends on a service with a shorter lifetime (e.g., Scoped). This can cause issues, such as a Singleton holding onto a Scoped database context, leading to incorrect behavior or resource leaks.
-- **Example of Captive Dependency Issue:**
-  ```csharp
-  services.AddSingleton<IProductService, ProductService>();
-  services.AddScoped<IProductRepository, SqlProductRepository>();
-  ```
-  Here, `ProductService` (Singleton) depends on `SqlProductRepository` (Scoped). Since the Singleton is created once, it captures the Scoped repository from the first request’s scope, reusing it across all requests, which can lead to stale data or concurrency issues.
-
-**Authors’ Perspective:**
-The authors strongly recommend validating lifetime configurations to avoid Captive Dependencies. They suggest using tools like SimpleInjector’s diagnostic features (if using a third-party container) or manually reviewing registrations. For the built-in container, developers must be diligent, as it lacks built-in diagnostics.
-
-### 5.4 Dependency Injection in Controllers
-
-ASP.NET Core controllers are resolved by the DI container, and dependencies are injected via constructor parameters.
-
-**Book Example:**
-```csharp
-public class ProductController : Controller
+public class ProductService
 {
-    private readonly IProductService _productService;
+    private readonly IProductRepository repository;
 
-    public ProductController(IProductService productService)
+    public ProductService(IProductRepository repository)  // Injection point
     {
-        _productService = productService ?? throw new ArgumentNullException(nameof(productService));
+        this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
     }
 
-    public IActionResult Index()
+    // Same CalculateDiscountedPrice method
+}
+```
+
+Now, the Composition Root (e.g., in `Startup.cs` for ASP.NET Core) handles instantiation: `services.AddTransient<IProductRepository, SqlProductRepository>();`. This restores IoC.
+
+### Alternative Example (If Book's Doesn't Relate)
+For a .NET Core console app not tied to e-commerce, consider a `WeatherService` that fetches data:
+
+Anti-Pattern:
+```csharp
+public class WeatherService
+{
+    private readonly HttpClient client = new HttpClient();  // Control Freak
+    public async Task<string> GetWeatherAsync(string city) { /* Use client */ }
+}
+```
+
+Refactored:
+```csharp
+public class WeatherService
+{
+    private readonly HttpClient client;
+    public WeatherService(HttpClient client) { this.client = client; }
+}
+```
+This leverages .NET Core's `IHttpClientFactory` for better management.
+
+## 2. Bastard Injection
+
+### Explanation and Author's Perspective
+Bastard Injection (also called Poor Man's Injection) involves providing a default constructor or overload that instantiates dependencies internally, while optionally allowing injection. The authors see this as a deceptive hybrid: it masquerades as DI-compliant but reintroduces Control Freak for "convenience." It often arises from legacy code transitions or when developers want "easy" instantiation without a container. In .NET Core, this conflicts with explicit registration in `IServiceCollection`, leading to inconsistent lifetimes and hidden defaults that surprise users.
+
+Minor topics:
+- **Foreign Defaults**: Defaults from external assemblies amplify coupling.
+- **Overload Variations**: Multiple constructors where one injects and another defaults.
+- **When It's Acceptable**: Rarely, e.g., for local defaults of Stable Dependencies, but never Volatile ones.
+
+### Book's Example
+Using the Commerce app, the anti-pattern appears in `ProductService` with an overloaded constructor:
+
+```csharp
+public class ProductService
+{
+    private readonly IProductRepository repository;
+
+    public ProductService() : this(new SqlProductRepository()) {}  // Bastard Injection: Default to concrete
+
+    public ProductService(IProductRepository repository)
     {
-        var products = _productService.GetFeaturedProducts();
-        return View(products);
+        this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    }
+
+    // CalculateDiscountedPrice as before
+}
+```
+
+This allows `new ProductService()` for quick use but defaults to a real SQL repository, making tests hit the database unexpectedly.
+
+### Why It's Problematic
+- **Hidden Dependencies**: Callers don't know about the default, leading to runtime surprises (e.g., production config issues).
+- **Testability**: Tests using the default constructor couple to the concrete implementation.
+- **Maintainability**: Changing the default requires recompiling consumers.
+
+The authors note this anti-pattern erodes trust in the class's API, as constructors should clearly declare requirements.
+
+### Refactoring to Proper DI
+Remove the default constructor, forcing injection:
+
+```csharp
+public class ProductService
+{
+    // Only the injecting constructor remains
+}
+```
+
+For convenience in non-container scenarios, use a factory or explicit creation in the Composition Root.
+
+### Alternative Example
+In a .NET Core API controller:
+
+Anti-Pattern:
+```csharp
+public class ValuesController : ControllerBase
+{
+    private readonly ILogger logger;
+
+    public ValuesController() : this(new Logger<ValuesController>(new LoggerFactory())) {}  // Bastard
+
+    public ValuesController(ILogger logger) { this.logger = logger; }
+}
+```
+
+Refactored: Rely on ASP.NET Core's built-in DI to inject `ILogger<ValuesController>` automatically.
+
+## 3. Constrained Construction
+
+### Explanation and Author's Perspective
+Constrained Construction happens when a dependency imposes a specific constructor signature on its consumers, forcing awkward adaptations. Seemann and van Deursen argue this anti-pattern stifles composability, as it assumes a fixed creation mechanism rather than abstractions. It's common in third-party libraries without DI-friendly designs. In .NET Core, this clashes with extensible registration patterns, like options builders.
+
+Minor topics:
+- **Implicit Constraints**: E.g., requiring parameterless constructors for serialization.
+- **Provider Patterns**: Using "providers" that dictate signatures, which the authors dismiss as non-patterns.
+- **Edge Cases**: Constraints from frameworks (e.g., WCF proxies).
+
+### Book's Example
+In the Commerce app, suppose `SqlProductRepository` requires a connection string in its constructor, but a higher-level service must adapt:
+
+Anti-Pattern (Constrained by dependency):
+```csharp
+public class SqlProductRepository : IProductRepository
+{
+    public SqlProductRepository(string connectionString) { /* ... */ }
+}
+
+public class ProductService
+{
+    // Forced to handle connectionString, even if not its concern
+    public ProductService(string connectionString)
+    {
+        this.repository = new SqlProductRepository(connectionString);
     }
 }
 ```
 
-**Explanation:**
-- The `ProductController` depends on `IProductService`, which is injected via Constructor Injection.
-- The DI container resolves `IProductService` and its dependencies (e.g., `IProductRepository`, `IPricingService`) when creating the controller.
-- The authors emphasize null checks in constructors to ensure dependencies are provided, aligning with defensive programming practices.
-- The `Index` action uses `_productService` to fetch featured products, demonstrating how DI enables loose coupling between the controller and business logic.
+This constrains `ProductService` to know about strings, breaking abstraction layers.
 
-**Technical Details:**
-- Controllers are typically registered with *Transient* lifetime by the `AddControllersWithViews` method, but their dependencies (e.g., `IProductService`) can have different lifetimes (e.g., Scoped).
-- The authors note that ASP.NET Core’s DI system automatically resolves controller dependencies, making it seamless to apply DI in MVC applications.
+### Why It's Problematic
+- **Coupling**: Consumers inherit irrelevant details from dependencies.
+- **Flexibility**: Hard to swap implementations without API changes.
+- **Testability**: Mocks must mimic the constraint.
 
-### 5.5 Advanced Scenarios
+### Refactoring to Proper DI
+Introduce abstractions or factories:
 
-#### 5.5.1 Injecting Dependencies into Middleware
-
-Middleware components in ASP.NET Core can also use DI. The authors explain two approaches: constructor injection and per-request injection.
-
-**Book Example (Constructor Injection in Middleware):**
 ```csharp
-public class LoggingMiddleware
+public class ProductService
 {
-    private readonly RequestDelegate _next;
-    private readonly ILogger _logger;
+    public ProductService(IProductRepository repository) { /* Injection */ }
+}
+```
 
-    public LoggingMiddleware(RequestDelegate next, ILogger logger)
+Configure in Composition Root: `services.AddTransient<IProductRepository>(sp => new SqlProductRepository(Configuration.GetConnectionString("Default")));`.
+
+### Alternative Example
+For .NET Core configuration: A service constrained by `IConfiguration` directly, instead of injecting options.
+
+Anti-Pattern:
+```csharp
+public class ConfigService
+{
+    public ConfigService(IConfiguration config) { /* Constrained to full config */ }
+}
+```
+
+Refactored: Use `IOptions<MyOptions>` for focused injection.
+
+## 4. Service Locator
+
+### Explanation and Author's Perspective
+Service Locator involves a static or passed-in resolver that classes use to fetch dependencies at runtime. The authors strongly condemn this as an anti-pattern that hides dependencies in method bodies, violating explicitness. Seemann famously called it an anti-pattern in his blog, arguing it turns DI into a "magic black box." In .NET Core, the built-in `IServiceProvider` can tempt this, but proper usage is limited to the Composition Root.
+
+Minor topics:
+- **Static vs. Injected Locator**: Both hide deps; injected is slightly better but still flawed.
+- **Dynamic Resolution**: Useful for plugins, but overused.
+- **Comparison to DI Containers**: Locators are containers in disguise, but without composition benefits.
+
+### Book's Example
+In Commerce:
+
+```csharp
+public class ProductService
+{
+    private readonly IServiceLocator locator;
+
+    public ProductService(IServiceLocator locator)
     {
-        _next = next;
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.locator = locator;
     }
+
+    public decimal CalculateDiscountedPrice(int productId)
+    {
+        var repository = this.locator.GetInstance<IProductRepository>();  // Service Locator
+        var product = repository.GetById(productId);
+        // ...
+    }
+}
+```
+
+Dependencies are resolved internally, obscuring what `ProductService` truly needs.
+
+### Why It's Problematic
+- **Hidden Dependencies**: No constructor signals requirements; discovery requires code inspection.
+- **Testability**: Mocks must configure the locator, complicating setups.
+- **Maintainability**: Refactoring breaks if resolutions change; violates SOLID (e.g., Interface Segregation).
+
+The authors note it promotes god classes and hinders parallel development.
+
+### Refactoring to Proper DI
+Convert to Constructor Injection:
+
+```csharp
+public class ProductService
+{
+    private readonly IProductRepository repository;
+
+    public ProductService(IProductRepository repository) { this.repository = repository; }
+}
+```
+
+Reserve `IServiceProvider` for factories or rare dynamic needs in the Root.
+
+### Alternative Example
+In ASP.NET Core middleware:
+
+Anti-Pattern:
+```csharp
+public class MyMiddleware
+{
+    private readonly RequestDelegate next;
+
+    public MyMiddleware(RequestDelegate next) { this.next = next; }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        _logger.Log("Request received");
-        await _next(context);
+        var service = context.RequestServices.GetService<IMyService>();  // Locator via HttpContext
+        // Use service
     }
 }
 ```
 
-**Registration:**
-```csharp
-services.AddSingleton<ILogger, ConsoleLogger>();
-```
+Refactored: Inject via constructor: `public MyMiddleware(RequestDelegate next, IMyService service) { ... }`.
 
-**Explanation:**
-- The middleware depends on `ILogger`, injected via the constructor.
-- The `RequestDelegate` parameter allows the middleware to call the next component in the pipeline.
-- Since middleware instances are created once at startup, their dependencies (e.g., `ILogger`) should be Singleton or carefully managed to avoid Captive Dependencies.
+## Chapter Summary and Broader Implications
+Seemann and van Deursen conclude by reinforcing that avoiding these anti-patterns leads to cleaner, more testable code. They preview Chapter 6's refactorings, which build on this catalog. From their perspective, DI is a mindset: always favor explicit, injectable dependencies. In .NET Core, leveraging the framework's DI (e.g., `AddScoped`, `AddSingleton`) amplifies these benefits, enabling scalable apps.
 
-**Per-Request Injection:**
-For dependencies with shorter lifetimes (e.g., Scoped), the authors recommend using the `InvokeAsync` method to receive dependencies.
-
-**Example:**
-```csharp
-public class LoggingMiddleware
-{
-    private readonly RequestDelegate _next;
-
-    public LoggingMiddleware(RequestDelegate next)
-    {
-        _next = next;
-    }
-
-    public async Task InvokeAsync(HttpContext context, IProductRepository repository)
-    {
-        // Use repository (Scoped) within the request
-        await _next(context);
-    }
-}
-```
-
-**Explanation:**
-- The `IProductRepository` is injected into `InvokeAsync`, ensuring it’s resolved per request.
-- This approach avoids Captive Dependencies when the middleware needs Scoped services.
-
-#### 5.5.2 Factory-Based Registration
-
-The authors discuss scenarios where concrete instances need to be created dynamically, using factory methods or delegates.
-
-**Book Example:**
-```csharp
-services.AddScoped<IProductService>(sp =>
-{
-    var repository = sp.GetService<IProductRepository>();
-    var pricingService = sp.GetService<IPricingService>();
-    return new ProductService(repository, pricingService);
-});
-```
-
-**Explanation:**
-- The lambda expression acts as a factory, allowing custom logic for creating `ProductService`.
-- `sp` is the `IServiceProvider`, used to resolve dependencies (`IProductRepository`, `IPricingService`) within the factory.
-- This is useful when the service creation requires additional logic or parameterization not handled by simple constructor injection.
-
-#### 5.5.3 Replacing the Built-In Container
-
-While the built-in DI container is sufficient for most applications, the authors note that advanced scenarios (e.g., auto-registration, interception, or diagnostics) may require a third-party container like Autofac or SimpleInjector.
-
-**Example with Autofac:**
-```csharp
-public class Startup
-{
-    public void ConfigureServices(IServiceCollection services)
-    {
-        services.AddControllersWithViews();
-    }
-
-    public void ConfigureContainer(ContainerBuilder builder)
-    {
-        builder.RegisterType<ProductService>().As<IProductService>().InstancePerLifetimeScope();
-        builder.RegisterType<SqlProductRepository>().As<IProductRepository>().InstancePerLifetimeScope();
-        builder.RegisterType<PricingService>().As<IPricingService>().InstancePerLifetimeScope();
-    }
-}
-```
-
-**Explanation:**
-- The `ConfigureContainer` method is used to configure Autofac, which replaces the built-in container.
-- `InstancePerLifetimeScope` in Autofac is equivalent to ASP.NET Core’s Scoped lifetime.
-- The authors caution that replacing the container requires careful integration to ensure compatibility with ASP.NET Core’s conventions (e.g., controller resolution).
-
-**Authors’ Perspective:**
-The authors recommend sticking with the built-in container unless specific advanced features are needed, as it simplifies the application and aligns with ASP.NET Core’s conventions.
-
-### 5.6 Common Pitfalls and Best Practices
-
-The authors highlight several pitfalls to avoid and best practices to follow when using DI in ASP.NET Core.
-
-#### 5.6.1 Pitfalls
-
-1. **Service Locator Pattern:**
-   - Using `IServiceProvider` directly in components (e.g., resolving services in a controller’s action method) is considered an anti-pattern because it hides dependencies and violates the Explicit Dependencies Principle.
-   - **Example (Anti-Pattern):**
-     ```csharp
-     public IActionResult Index(IServiceProvider sp)
-     {
-         var service = sp.GetService<IProductService>();
-         var products = service.GetFeaturedProducts();
-         return View(products);
-     }
-     ```
-   - **Correct Approach:** Use Constructor Injection instead.
-
-2. **Captive Dependencies:**
-   - As discussed earlier, mixing lifetimes incorrectly can lead to bugs. The authors recommend auditing registrations to ensure compatibility.
-
-3. **Overusing Transient Lifetime:**
-   - Overusing Transient can lead to performance issues due to excessive object creation. Scoped or Singleton lifetimes are often more appropriate for services with shared state or expensive initialization.
-
-#### 5.6.2 Best Practices
-
-1. **Use Constructor Injection:**
-   - Always prefer Constructor Injection for controllers, services, and middleware to make dependencies explicit.
-
-2. **Centralize the Composition Root:**
-   - Keep all service registrations in `ConfigureServices` or `Program.cs` to maintain clarity and avoid scattered configuration.
-
-3. **Validate Lifetimes:**
-   - Regularly review service lifetimes to prevent Captive Dependencies. Consider using diagnostic tools if using a third-party container.
-
-4. **Avoid Manual Service Resolution:**
-   - Avoid calling `GetService` directly except in specific scenarios (e.g., factories or middleware `InvokeAsync`).
-
-5. **Use Null Checks:**
-   - Include null checks in constructors to ensure dependencies are provided, as shown in the `ProductController` example.
-
-**Authors’ Perspective:**
-The authors emphasize that following these best practices aligns with the principles of DI (e.g., SOLID, loose coupling) and ensures maintainable, testable code. They encourage developers to understand the DI container’s behavior deeply to avoid subtle bugs.
-
-### 5.7 Additional Example (When Book Example Is Insufficient)
-
-To clarify the concept of *Captive Dependencies* (not fully illustrated with a complex example in the book), consider the following scenario outside the *Commerce* application:
-
-**Scenario:**
-A `UserService` (Singleton) depends on a `DbContext` (Scoped). This creates a Captive Dependency because the Singleton captures the `DbContext` from the first request’s scope.
-
-```csharp
-public class UserService
-{
-    private readonly AppDbContext _dbContext;
-
-    public UserService(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-
-    public string GetUser(int id)
-    {
-        return _dbContext.Users.Find(id)?.Name;
-    }
-}
-
-services.AddSingleton<UserService>();
-services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
-```
-
-**Issue:**
-- The `UserService` (Singleton) holds onto the first `AppDbContext` instance, which is disposed of at the end of the first request, leading to runtime errors (e.g., `ObjectDisposedException`) in subsequent requests.
-
-**Solution:**
-- Change `UserService` to Scoped or use a factory to resolve `AppDbContext` per request:
-  ```csharp
-  services.AddScoped<UserService>();
-  ```
-  Alternatively, use a factory:
-  ```csharp
-  services.AddSingleton<IUserService>(sp =>
-  {
-      return new UserService(() => sp.CreateScope().ServiceProvider.GetService<AppDbContext>());
-  });
-
-  public class UserService
-  {
-      private readonly Func<AppDbContext> _dbContextFactory;
-
-      public UserService(Func<AppDbContext> dbContextFactory)
-      {
-          _dbContextFactory = dbContextFactory;
-      }
-
-      public string GetUser(int id)
-      {
-          using var dbContext = _dbContextFactory();
-          return dbContext.Users.Find(id)?.Name;
-      }
-  }
-  ```
-
-**Explanation:**
-- The factory approach ensures a new `AppDbContext` is created per request, avoiding the Captive Dependency issue.
-- This example reinforces the authors’ warning about lifetime mismatches and demonstrates a practical solution.
-
-### 5.8 Summary of Authors’ Perspective
-
-# Key Takeaways from Chapter 5: Dependency Injection in ASP.NET Core
-
-1. **ASP.NET Core’s DI System is Practical and Lightweight**  
-   Encourages good DI practices like Constructor Injection and centralized Composition Root. It is designed to be accessible without requiring external libraries for most applications.
-   - *Supporting Detail:* This simplicity reduces overhead while maintaining best practices, making it easy for developers to adopt DI.
-
-2. **Importance of Understanding Service Lifetimes**  
-   Knowing the differences between Transient, Scoped, and Singleton lifetimes helps avoid common pitfalls like Captive Dependencies.
-   - *Supporting Detail:* Misconfiguring lifetimes can lead to subtle bugs, such as stale data or resource leaks in Singleton services.
-
-3. **Balanced Approach: Practical Guidance and Theoretical Principles**  
-   The chapter includes real-world code examples from the *Commerce* application alongside DI principles.
-   - *Supporting Detail:* This combination ensures developers can both understand the concepts and apply them effectively in their projects.
-
-4. **Guidance on Service Registrations and Configuration**  
-   Shows how to register services using `AddScoped`, `AddTransient`, and `AddSingleton` in `Startup.cs` or `Program.cs`.
-   - *Supporting Detail:* Centralizing service registration simplifies maintenance and adheres to the Composition Root pattern.
-
-5. **Common Pitfalls Highlighted, such as Captive Dependencies**  
-   Captive Dependencies occur when a Singleton depends on a Scoped service, leading to runtime issues.
-   - *Supporting Detail:* Examples show how improper lifetime management can cause unexpected behavior, with suggestions to avoid these issues.
-
-6. **Flexibility with Third-Party Containers**  
-   While ASP.NET Core’s built-in container is sufficient for most needs, the authors explain when and how to integrate third-party containers like Autofac.
-   - *Supporting Detail:* Advanced features like interception or auto-registration may require external containers for added functionality.
-
-7. **DI in Controllers and Middleware**  
-   Explains Constructor Injection in controllers and how to inject dependencies into middleware components.
-   - *Supporting Detail:* Middleware with Singleton lifetimes should avoid directly depending on Scoped services to prevent lifecycle mismatches.
-
-8. **Factory-Based Service Registrations for Complex Scenarios**  
-   Demonstrates using lambda expressions to dynamically create service instances when additional logic is needed.
-   - *Supporting Detail:* This approach offers flexibility for services requiring runtime configuration or conditional behavior.
-
-9. **Best Practices for Effective Dependency Injection**  
-   Recommends using Constructor Injection, centralizing the Composition Root, avoiding Service Locator patterns, and validating service lifetimes regularly.
-   - *Supporting Detail:* Following these practices ensures maintainable, testable, and robust applications, aligned with SOLID principles.
-
-10. **Limitations and Advanced Considerations**  
-    Discusses limitations like the lack of named services in the built-in container and offers strategies like using wrapper classes or factories.
-    - *Supporting Detail:* Understanding these constraints helps developers choose the right tool or pattern for their specific requirements.
-
-
-### 5.9 Minor Topics and Nuances
-
-- **Named Services:** The built-in container doesn’t support named services natively, unlike some third-party containers. The authors suggest using factories or wrapper classes for scenarios requiring multiple implementations of the same interface.
-- **IDisposable Dependencies:** Services implementing `IDisposable` (e.g., `DbContext`) are automatically disposed of by the container at the end of their lifetime (e.g., end of request for Scoped services).
-- **ServiceProvider Scope:** The authors clarify that `IServiceProvider` obtained from `BuildServiceProvider` creates a new scope, and developers should avoid creating unnecessary scopes to prevent resource leaks.
-- **Testing Considerations:** The chapter briefly mentions that DI simplifies unit testing by allowing dependencies to be mocked, but this is explored further in later chapters.
-
----
-
-## Conclusion
-
-Chapter 5 of *Dependency Injection Principles, Practices, and Patterns* provides a thorough guide to using DI in ASP.NET Core, leveraging the built-in container to implement robust, maintainable applications. By focusing on the *Commerce* application, the authors demonstrate practical applications of Constructor Injection, service lifetimes, and the Composition Root. They address advanced scenarios (e.g., middleware, factories) and highlight pitfalls like Captive Dependencies, ensuring developers understand both the “how” and “why” of DI in ASP.NET Core. The additional example provided here clarifies complex concepts like Captive Dependencies, aligning with the authors’ emphasis on lifetime management.
-
-If you have specific questions about any section, code example, or concept from Chapter 5, or if you’d like me to dive deeper into a particular topic (e.g., integrating a third-party container or testing with DI), please let me know!
+Independent research confirms the authors' views: Studies on DI anti-patterns in Java and .NET systems show these patterns correlate with higher bug rates and refactoring costs. For unillustrated concepts like multi-tenancy impacts, consider a tenant-aware repository: Control Freak would hardcode tenant IDs, while proper DI injects a `ITenantContext`. This ensures the chapter's lessons apply broadly.
